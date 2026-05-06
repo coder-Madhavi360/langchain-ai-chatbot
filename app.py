@@ -1,129 +1,140 @@
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_community.llms import Ollama
-
 import streamlit as st
 
-# ---------------- PAGE CONFIG ----------------
+from rag_pipeline import (
+    process_documents,
+    ask_documents
+)
 
+from utils import save_uploaded_file
+
+from config import APP_NAME
+
+# Page config
 st.set_page_config(
-    page_title="AI Study Assistant",
-    page_icon="🤖",
+    
+    page_title="Advanced RAG Chatbot",
     layout="wide"
 )
 
-# ---------------- SIDEBAR ----------------
+# Load CSS
+with open("styles.css") as f:
 
+    st.markdown(
+        f"<style>{f.read()}</style>",
+        unsafe_allow_html=True
+    )
+
+# Sidebar
 with st.sidebar:
 
-    st.title("⚙ Settings")
+    st.title("📂 Upload Documents")
 
-    model_name = st.selectbox(
-        "Choose Model",
-        ["tinyllama"]
+    uploaded_files = st.file_uploader(
+        "Upload files",
+        type=[
+            "pdf",
+            "txt",
+            "csv",
+            "html",
+            "docx",
+            "pptx"
+        ],
+        accept_multiple_files=True
     )
 
     st.markdown("---")
 
     st.info(
-        "This chatbot is built using LangChain + Ollama + Streamlit"
+        "Upload multiple documents and chat with them."
     )
 
-    if st.button("Clear Chat"):
-        st.session_state.messages = []
-
-# ---------------- TITLE ----------------
-
-st.title("🤖 AI Study Assistant")
+# Main title
+st.title(APP_NAME)
 
 st.markdown(
-    '''
-    <div style="padding:15px;border-radius:10px;background-color:#262730;">
-    🚀 Ask questions about AI, coding, internships, studies, and technology.
-    </div>
-    ''',
-    unsafe_allow_html=True
+    "### Advanced Multi-Document RAG System"
 )
 
-# ---------------- PROMPT ----------------
-
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a helpful AI assistant. Give short and clear answers."
-        ),
-        (
-            "user",
-            "Question: {question}"
-        )
-    ]
-)
-
-# ---------------- LLM ----------------
-
-llm = Ollama(model=model_name)
-
-# ---------------- OUTPUT PARSER ----------------
-
-output_parser = StrOutputParser()
-
-# ---------------- CHAIN ----------------
-
-chain = prompt | llm | output_parser
-
-# ---------------- CHAT HISTORY ----------------
-
+# Session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Previous Messages
+if "retriever" not in st.session_state:
+    st.session_state.retriever = None
 
-for message in st.session_state.messages:
+# Process files
+if uploaded_files:
 
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+    file_paths = []
 
-# ---------------- USER INPUT ----------------
+    for uploaded_file in uploaded_files:
 
-user_input = st.chat_input("Ask your question...")
+        file_path = save_uploaded_file(
+            uploaded_file
+        )
 
-# ---------------- RESPONSE ----------------
+        file_paths.append(file_path)
 
-if user_input:
+    with st.spinner("Processing documents..."):
 
-    # Store User Message
+        st.session_state.retriever = (
+            process_documents(file_paths)
+        )
+
+    st.success("Documents processed successfully!")
+
+# Display history
+for msg in st.session_state.messages:
+
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# Chat input
+question = st.chat_input(
+    "Ask questions about your documents..."
+)
+
+# Ask question
+if question and st.session_state.retriever:
 
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": user_input
+            "content": question
         }
     )
-
-    # Show User Message
 
     with st.chat_message("user"):
-        st.write(user_input)
+        st.write(question)
 
-    # Generate AI Response
+    with st.spinner("Thinking..."):
 
-    response = chain.invoke(
-        {
-            "question": user_input
-        }
-    )
+        result = ask_documents(
+            question,
+            st.session_state.retriever
+        )
 
-    # Store Assistant Response
+    answer = result["answer"]
+
+    sources = result["sources"]
+
+    final_response = f"""
+{answer}
+
+📚 Sources:
+{', '.join(sources)}
+"""
 
     st.session_state.messages.append(
         {
             "role": "assistant",
-            "content": response
+            "content": final_response
         }
     )
 
-    # Show Assistant Response
-
     with st.chat_message("assistant"):
-        st.write(response)
+        st.write(final_response)
+
+elif question and not st.session_state.retriever:
+
+    st.warning("Please upload documents first.")
